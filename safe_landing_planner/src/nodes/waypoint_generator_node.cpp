@@ -92,9 +92,9 @@ void WaypointGeneratorNode::trajectoryCallback(const mavros_msgs::Trajectory &ms
 }
 
 void WaypointGeneratorNode::stateCallback(const mavros_msgs::State &msg) {
-  if (msg.mode == "AUTO.LAND") {
+  if (msg.mode == "LAND") {
     waypointGenerator_.is_land_waypoint_ = true;
-  } else if (msg.mode == "AUTO.MISSION") {
+  } else if (msg.mode == "AUTO" || msg.mode == "MISSION") {
     // is_land_waypoint_ is set trought the mission item type
   } else {
     waypointGenerator_.is_land_waypoint_ = false;

@@ -15,7 +15,8 @@
 
 namespace avoidance {
 
-LocalPlannerNodelet::LocalPlannerNodelet() : tf_buffer_(5.f), spin_dt_(0.1) {}
+  // Changed spin_dt from 0.1 to 0.2 (5Hz) to reduce CPU load on Jetson Nano
+LocalPlannerNodelet::LocalPlannerNodelet() : tf_buffer_(5.f), spin_dt_(0.2) {}
 
 LocalPlannerNodelet::~LocalPlannerNodelet() {
   should_exit_ = true;
@@ -60,12 +61,17 @@ void LocalPlannerNodelet::onInit() {
 }
 
 void LocalPlannerNodelet::InitializeNodelet() {
+  NODELET_DEBUG("Initializing ArduPilot Avoidance Node...");
+  
   nh_ = ros::NodeHandle("");
   nh_private_ = ros::NodeHandle("~");
 
+  // Khởi tạo các con trỏ tới thuật toán cốt lõi
   local_planner_.reset(new LocalPlanner());
   wp_generator_.reset(new WaypointGenerator());
-  avoidance_node_.reset(new AvoidanceNode(nh_, nh_private_));
+  
+  // [ĐÃ XÓA] avoidance_node_.reset(...) -> Vì class này chứa State Machine và Failsafe 
+  // chuyên biệt của PX4 (như MAV_STATE_BOOT, AUTO, OFFBOARD). ArduPilot tự quản lý Failsafe.
 
 #ifndef DISABLE_SIMULATION
   world_visualizer_.reset(new WorldVisualizer(nh_, nodelet::Nodelet::getName()));
@@ -73,32 +79,59 @@ void LocalPlannerNodelet::InitializeNodelet() {
 
   readParams();
 
+  // Khởi tạo TF Listener để transform PointCloud từ Camera sang Base_link
   tf_listener_ = new tf::TransformListener(ros::Duration(tf::Transformer::DEFAULT_CACHE_TIME), true);
 
-  // initialize standard subscribers
-  pose_sub_ = nh_.subscribe<const geometry_msgs::PoseStamped&>("mavros/local_position/pose", 1,
-                                                               &LocalPlannerNodelet::positionCallback, this);
-  velocity_sub_ = nh_.subscribe<const geometry_msgs::TwistStamped&>("mavros/local_position/velocity_local", 1,
-                                                                    &LocalPlannerNodelet::velocityCallback, this);
+  // =====================================================================
+  // 1. SUBSCRIBERS: Lắng nghe trạng thái từ ArduPilot (Giữ nguyên)
+  // =====================================================================
+  
+  // Vị trí (Local Pose) cực kỳ quan trọng cho EKF
+  pose_sub_ = nh_.subscribe<const geometry_msgs::PoseStamped&>(
+      "mavros/local_position/pose", 1, &LocalPlannerNodelet::positionCallback, this);
+      
+  // Vận tốc hiện tại
+  velocity_sub_ = nh_.subscribe<const geometry_msgs::TwistStamped&>(
+      "mavros/local_position/velocity_local", 1, &LocalPlannerNodelet::velocityCallback, this);
+      
+  // Trạng thái chung (Mode GUIDED, Armed)
   state_sub_ = nh_.subscribe("mavros/state", 1, &LocalPlannerNodelet::stateCallback, this);
+  
+  // Cảm biến khoảng cách dưới bụng (nếu có)
+  distance_sensor_sub_ = nh_.subscribe("mavros/altitude", 1, &LocalPlannerNodelet::distanceSensorCallback, this);
+
+  // =====================================================================
+  // 2. SUBSCRIBERS: Nhận lệnh Goal (Đích đến) từ người dùng / Rviz
+  // =====================================================================
   clicked_point_sub_ = nh_.subscribe("clicked_point", 1, &LocalPlannerNodelet::clickedPointCallback, this);
   clicked_goal_sub_ = nh_.subscribe("move_base_simple/goal", 1, &LocalPlannerNodelet::clickedGoalCallback, this);
-  fcu_input_sub_ = nh_.subscribe("mavros/trajectory/desired", 1, &LocalPlannerNodelet::fcuInputGoalCallback, this);
   goal_topic_sub_ = nh_.subscribe("input/goal_position", 1, &LocalPlannerNodelet::updateGoalCallback, this);
-  distance_sensor_sub_ = nh_.subscribe("mavros/altitude", 1, &LocalPlannerNodelet::distanceSensorCallback, this);
-  mavros_vel_setpoint_pub_ = nh_.advertise<geometry_msgs::Twist>("mavros/setpoint_velocity/cmd_vel_unstamped", 10);
-  mavros_pos_setpoint_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("mavros/setpoint_position/local", 10);
-  mavros_obstacle_free_path_pub_ = nh_.advertise<mavros_msgs::Trajectory>("mavros/trajectory/generated", 10);
-  mavros_obstacle_distance_pub_ = nh_.advertise<sensor_msgs::LaserScan>("mavros/obstacle/send", 10);
 
-  // initialize visualization topics
+  // [ĐÃ XÓA] fcu_input_sub_ (Topic "mavros/trajectory/desired" của PX4)
+
+  // =====================================================================
+  // 3. PUBLISHERS: Gửi lệnh điều khiển xuống ArduPilot
+  // =====================================================================
+  
+  // [QUAN TRỌNG NHẤT]: Chuyển sang dùng TwistStamped cho ArduPilot
+  // Topic cmd_vel của ArduPilot hoạt động tốt nhất với message có chứa timestamp
+  mavros_vel_setpoint_pub_ = nh_.advertise<geometry_msgs::TwistStamped>("mavros/setpoint_velocity/cmd_vel", 10);
+  
+  // Gửi vị trí an toàn kế tiếp
+  mavros_pos_setpoint_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("mavros/setpoint_position/local", 10);
+
+  // [ĐÃ XÓA] mavros_obstacle_free_path_pub_ (Topic Trajectory của PX4)
+  // [ĐÃ XÓA] mavros_obstacle_distance_pub_ (Topic Fake LaserScan của PX4)
+
+  // Khởi tạo Rviz markers để debug
   visualizer_.initializePublishers(nh_);
 
-  // pass initial goal into local planner
+  // Khởi chạy điểm đích ban đầu
   local_planner_->applyGoal();
 
-  setSystemStatus(MAV_STATE::MAV_STATE_BOOT);
+  // [ĐÃ XÓA] setSystemStatus(MAV_STATE::MAV_STATE_BOOT);
 
+  // Khởi tạo các cờ trạng thái
   hover_ = false;
   planner_is_healthy_ = true;
   armed_ = false;
@@ -211,19 +244,15 @@ void LocalPlannerNodelet::velocityCallback(const geometry_msgs::TwistStamped& ms
 void LocalPlannerNodelet::stateCallback(const mavros_msgs::State& msg) {
   armed_ = msg.armed;
 
-  if (msg.mode == "AUTO.MISSION") {
+  if (msg.mode == "AUTO" || msg.mode == "MISSION") {
     nav_state_ = NavigationState::mission;
-  } else if (msg.mode == "AUTO.TAKEOFF") {
+  } else if (msg.mode == "TAKEOFF") {
     nav_state_ = NavigationState::auto_takeoff;
-  } else if (msg.mode == "AUTO.LAND") {
+  } else if (msg.mode == "LAND") {
     nav_state_ = NavigationState::auto_land;
-  } else if (msg.mode == "AUTO.RTL") {
+  } else if (msg.mode == "RTL") {
     nav_state_ = NavigationState::auto_rtl;
-  } else if (msg.mode == "AUTO.RTGS") {
-    nav_state_ = NavigationState::auto_rtgs;
-  } else if (msg.mode == "AUTO.LOITER") {
-    nav_state_ = NavigationState::auto_loiter;
-  } else if (msg.mode == "OFFBOARD") {
+  } else if (msg.mode == "GUIDED") {
     nav_state_ = NavigationState::offboard;
   } else {
     nav_state_ = NavigationState::none;
@@ -297,14 +326,14 @@ void LocalPlannerNodelet::calculateWaypoints(bool hover) {
   last_adapted_waypoint_position_ = newest_adapted_waypoint_position_;
   newest_adapted_waypoint_position_ = result.adapted_goto_position;
 
-  // visualize waypoint topics
-  visualizer_.visualizeWaypoints(result.goto_position, result.adapted_goto_position, result.smoothed_goto_position);
-  visualizer_.publishPaths(last_position_, newest_position_, last_waypoint_position_, newest_waypoint_position_,
-                           last_adapted_waypoint_position_, newest_adapted_waypoint_position_);
-  visualizer_.publishCurrentSetpoint(toTwist(result.linear_velocity_wp, result.angular_velocity_wp),
-                                     result.waypoint_type, newest_position_);
+  // visualize waypoint topics (Disabled to save CPU on Jetson Nano)
+  // visualizer_.visualizeWaypoints(result.goto_position, result.adapted_goto_position, result.smoothed_goto_position);
+  // visualizer_.publishPaths(last_position_, newest_position_, last_waypoint_position_, newest_waypoint_position_,
+  //                          last_adapted_waypoint_position_, newest_adapted_waypoint_position_);
+  // visualizer_.publishCurrentSetpoint(toTwist(result.linear_velocity_wp, result.angular_velocity_wp),
+  //                                    result.waypoint_type, newest_position_);
 
-  visualizer_.publishOfftrackPoints(closest_pt, deg60_pt);
+  // visualizer_.publishOfftrackPoints(closest_pt, deg60_pt);
 
   // send waypoints to mavros
   mavros_msgs::Trajectory obst_free_path = {};
@@ -468,8 +497,9 @@ void LocalPlannerNodelet::threadFunction() {
       updatePlannerInfo();
       local_planner_->runPlanner();
 
-      visualizer_.visualizePlannerData(*(local_planner_.get()), newest_waypoint_position_,
-                                       newest_adapted_waypoint_position_, newest_position_, newest_orientation_);
+      // Disabled to save CPU on Jetson Nano
+      // visualizer_.visualizePlannerData(*(local_planner_.get()), newest_waypoint_position_,
+      //                                  newest_adapted_waypoint_position_, newest_position_, newest_orientation_);
       publishLaserScan();
 
       std::lock_guard<std::mutex> lock(waypoints_mutex_);
