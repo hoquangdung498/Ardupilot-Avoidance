@@ -23,6 +23,7 @@ find_package(catkin REQUIRED COMPONENTS
 )
 find_package(PCL 1.7 REQUIRED)
 find_package(octomap REQUIRED)
+find_package(GeographicLib REQUIRED)
 
 if(DISABLE_SIMULATION)
   message(STATUS "Building avoidance without Gazebo Simulation")
@@ -164,10 +165,16 @@ add_dependencies(global_planner ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXP
 
 ## Declare a C++ executable
 add_executable(global_planner_node src/nodes/global_planner_node_main.cpp)
+add_executable(global_gps_adapter src/nodes/global_gps_adapter.cpp)
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(global_planner_node
   global_planner ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${YAML_CPP_LIBRARIES}
+)
+
+target_link_libraries(global_gps_adapter
+  ${catkin_LIBRARIES}
+  ${GeographicLib_LIBRARIES}
 )
 
 #############

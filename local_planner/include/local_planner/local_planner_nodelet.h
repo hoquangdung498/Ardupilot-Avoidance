@@ -197,6 +197,7 @@ class LocalPlannerNodelet : public nodelet::Nodelet {
   ros::Subscriber fcu_input_sub_;
   ros::Subscriber goal_topic_sub_;
   ros::Subscriber distance_sensor_sub_;
+  ros::Subscriber intermediate_goal_sub_;
 
   ros::CallbackQueue pointcloud_queue_;
   ros::CallbackQueue main_queue_;
@@ -323,6 +324,11 @@ class LocalPlannerNodelet : public nodelet::Nodelet {
   * @param[in] msg,
   **/
   void updateGoalCallback(const visualization_msgs::MarkerArray& msg);
+  /**
+  * @brief     callback for intermediate goals from global planner
+  * @param[in] msg, goal position
+  **/
+  void intermediateGoalCallback(const geometry_msgs::PoseStamped& msg);
   /**
   * @brief     callaback for setting the goal from the FCU Mission Waypoints
   * @param[in] msg, current and next position goals

@@ -79,6 +79,12 @@ void GlobalPlannerNode::readParams() {
   nh_.param<double>("start_pos_y", start_pos_.y, 0.5);
   nh_.param<double>("start_pos_z", start_pos_.z, 3.5);
   nh_.param<std::string>("frame_id", frame_id_, "local_origin");
+  nh_private_.param<bool>("output_to_local_planner", output_to_local_planner_, false);
+
+  if (output_to_local_planner_) {
+    intermediate_goal_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("intermediate_goal", 10);
+  }
+
   nh_.getParam("pointcloud_topics", camera_topics);
   if (!nh_.hasParam("camera_frame_id")) {
     nh_.setParam("camera_frame_id", "camera_link");
@@ -419,15 +425,20 @@ void GlobalPlannerNode::publishSetpoint() {
   // Publish setpoint for vizualization
   current_waypoint_publisher_.publish(setpoint);
 
-  // Publish setpoint to Mavros
-  mavros_waypoint_publisher_.publish(setpoint);
-  mavros_msgs::Trajectory obst_free_path = {};
-  geometry_msgs::Twist velocity_setpoint{};
-  velocity_setpoint.linear.x = NAN;
-  velocity_setpoint.linear.y = NAN;
-  velocity_setpoint.linear.z = NAN;
-  avoidance::transformToTrajectory(obst_free_path, setpoint, velocity_setpoint);
-  mavros_obstacle_free_path_pub_.publish(obst_free_path);
+  if (output_to_local_planner_) {
+    // Publish intermediate goal to Local Planner
+    intermediate_goal_pub_.publish(setpoint);
+  } else {
+    // Publish setpoint to Mavros
+    mavros_waypoint_publisher_.publish(setpoint);
+    mavros_msgs::Trajectory obst_free_path = {};
+    geometry_msgs::Twist velocity_setpoint{};
+    velocity_setpoint.linear.x = NAN;
+    velocity_setpoint.linear.y = NAN;
+    velocity_setpoint.linear.z = NAN;
+    avoidance::transformToTrajectory(obst_free_path, setpoint, velocity_setpoint);
+    mavros_obstacle_free_path_pub_.publish(obst_free_path);
+  }
 }
 
 bool GlobalPlannerNode::isCloseToGoal() { return distance(current_goal_, last_pos_) < speed_; }

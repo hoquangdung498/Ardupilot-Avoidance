@@ -6,16 +6,20 @@
     <node pkg="tf" type="static_transform_publisher" name="tf_depth_camera"
           args="0 0 0 -1.57 0 -1.57 fcu camera_link 10"/>
 
-    <!-- PointCloud Downsampling for Jetson Nano CPU optimization -->
-    <node pkg="nodelet" type="nodelet" name="pcl_manager" args="manager" output="screen" />
-    <node pkg="nodelet" type="nodelet" name="voxel_grid" args="load pcl/VoxelGrid pcl_manager" output="screen">
+    <!-- Launch local planner -->
+    <arg name="manager" default="local_planner_manager"/>
+
+    <node pkg="nodelet" type="nodelet" name="$(arg manager)" args="manager" output="screen"/>
+
+    <!-- PointCloud Downsampling for Jetson Nano CPU optimization (Shared Nodelet Manager) -->
+    <node pkg="nodelet" type="nodelet" name="voxel_grid" args="load pcl/VoxelGrid $(arg manager)" output="screen">
       <remap from="~input" to="/camera/depth/points" />
       <remap from="~output" to="/camera/depth/points_downsampled" />
       <param name="filter_field_name" value="z" />
       <param name="filter_limit_min" value="0.2" />
-      <param name="filter_limit_max" value="10.0" />
+      <param name="filter_limit_max" value="5.0" />
       <param name="filter_limit_negative" value="False" />
-      <param name="leaf_size" value="0.15" />
+      <param name="leaf_size" value="0.2" />
     </node>
 
     <!-- Launch mavros for Ardupilot -->
@@ -23,14 +27,17 @@
         <arg name="fcu_url" value="$(arg fcu_url)" />
     </include>
 
-    <!-- Launch local planner -->
-    <arg name="manager"             default="local_planner_manager"/>
-
-    <node pkg="nodelet" type="nodelet" name="$(arg manager)" args="manager" output="screen"/>
-    <node pkg="nodelet" type="nodelet" name="local_planner_nodelet" args="load LocalPlannerNodelet $(arg manager)" output="screen">
+    <node pkg="nodelet" type="nodelet" name="local_planner_nodelet" args="load avoidance/LocalPlannerNodelet $(arg manager)" output="screen">
       <param name="goal_x_param" value="10" />
       <param name="goal_y_param" value="0"/>
       <param name="goal_z_param" value="2" />
+      
+      <!-- Optimization for Jetson Nano CPU -->
+      <param name="children_per_node_" value="4" />
+      <param name="n_expanded_nodes_" value="20" />
+      <param name="smoothing_margin_degrees_" value="30" />
+      <param name="min_num_points_per_cell_" value="2" />
+      
       <rosparam param="pointcloud_topics" subst_value="True">$(arg pointcloud_topics)</rosparam>
     </node>
 

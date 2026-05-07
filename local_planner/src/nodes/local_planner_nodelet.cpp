@@ -15,7 +15,6 @@
 
 namespace avoidance {
 
-  // Changed spin_dt from 0.1 to 0.2 (5Hz) to reduce CPU load on Jetson Nano
 LocalPlannerNodelet::LocalPlannerNodelet() : tf_buffer_(5.f), spin_dt_(0.2) {}
 
 LocalPlannerNodelet::~LocalPlannerNodelet() {
@@ -106,6 +105,7 @@ void LocalPlannerNodelet::InitializeNodelet() {
   clicked_point_sub_ = nh_.subscribe("clicked_point", 1, &LocalPlannerNodelet::clickedPointCallback, this);
   clicked_goal_sub_ = nh_.subscribe("move_base_simple/goal", 1, &LocalPlannerNodelet::clickedGoalCallback, this);
   goal_topic_sub_ = nh_.subscribe("input/goal_position", 1, &LocalPlannerNodelet::updateGoalCallback, this);
+  intermediate_goal_sub_ = nh_.subscribe("intermediate_goal", 1, &LocalPlannerNodelet::intermediateGoalCallback, this);
 
   // [ĐÃ XÓA] fcu_input_sub_ (Topic "mavros/trajectory/desired" của PX4)
 
@@ -363,6 +363,12 @@ void LocalPlannerNodelet::updateGoalCallback(const visualization_msgs::MarkerArr
     goal_position_ = toEigen(msg.markers[0].pose.position);
     new_goal_ = true;
   }
+}
+
+void LocalPlannerNodelet::intermediateGoalCallback(const geometry_msgs::PoseStamped& msg) {
+  new_goal_ = true;
+  prev_goal_position_ = goal_position_;
+  goal_position_ = toEigen(msg.pose.position);
 }
 
 void LocalPlannerNodelet::fcuInputGoalCallback(const mavros_msgs::Trajectory& msg) {

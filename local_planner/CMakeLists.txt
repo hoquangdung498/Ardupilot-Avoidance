@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Optimization for Jetson Nano (ARM v8)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=armv8-a+simd -mtune=cortex-a57")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=armv8-a+simd -mtune=cortex-a57 -ffast-math -flto")
 endif()
 
 ## Find catkin macros and libraries

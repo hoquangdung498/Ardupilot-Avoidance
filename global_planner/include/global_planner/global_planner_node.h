@@ -77,6 +77,7 @@ class GlobalPlannerNode {
   ros::Publisher mavros_waypoint_publisher_;
   ros::Publisher current_waypoint_publisher_;
   ros::Publisher pointcloud_pub_;
+  ros::Publisher intermediate_goal_pub_;
 
   ros::Time start_time_;
   ros::Time last_wp_time_;
@@ -109,6 +110,7 @@ class GlobalPlannerNode {
   double speed_;
   double start_yaw_;
   bool position_received_;
+  bool output_to_local_planner_;
   std::string frame_id_;
   std::string camera_frame_id_;
 
