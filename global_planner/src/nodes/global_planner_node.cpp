@@ -255,7 +255,8 @@ void GlobalPlannerNode::clickedPointCallback(const geometry_msgs::PointStamped& 
 }
 
 void GlobalPlannerNode::moveBaseSimpleCallback(const geometry_msgs::PoseStamped& msg) {
-  setNewGoal(GoalCell(msg.pose.position.x, msg.pose.position.y, clicked_goal_alt_, clicked_goal_radius_));
+  // Lấy độ cao Z trực tiếp từ message thay vì dùng clicked_goal_alt_ mặc định
+  setNewGoal(GoalCell(msg.pose.position.x, msg.pose.position.y, msg.pose.position.z, clicked_goal_radius_));
 }
 
 void GlobalPlannerNode::fcuInputGoalCallback(const mavros_msgs::Trajectory& msg) {

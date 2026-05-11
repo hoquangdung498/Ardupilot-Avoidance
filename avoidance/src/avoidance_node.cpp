@@ -124,44 +124,23 @@ void AvoidanceNode::px4ParamsCallback(const mavros_msgs::Param& msg) {
 }
 
 void AvoidanceNode::checkPx4Parameters() {
-  auto& client = get_px4_param_client_;
-  auto request_param = [&client](const std::string& name, float& val) {
-    mavros_msgs::ParamGet req;
-    req.request.param_id = name;
-    if (client.call(req) && req.response.success) {
-      val = req.response.value.real;
-    }
-  };
   while (!should_exit_) {
-    bool is_param_not_initialized = true;
     {
       std::lock_guard<std::mutex> lck(*(param_cb_mutex_));
-      request_param("MPC_ACC_HOR", px4_.param_mpc_acc_hor);
-      request_param("MPC_ACC_DOWN_MAX", px4_.param_mpc_acc_down_max);
-      request_param("MPC_ACC_UP_MAX", px4_.param_mpc_acc_up_max);
-      request_param("MPC_XY_CRUISE", px4_.param_mpc_xy_cruise);
-      request_param("MPC_Z_VEL_MAX_DN", px4_.param_mpc_z_vel_max_dn);
-      request_param("MPC_Z_VEL_MAX_UP", px4_.param_mpc_z_vel_max_up);
-      request_param("CP_DIST", px4_.param_cp_dist);
-      request_param("MPC_LAND_SPEED", px4_.param_mpc_land_speed);
-      request_param("MPC_JERK_MAX", px4_.param_mpc_jerk_max);
-      request_param("NAV_ACC_RAD", px4_.param_nav_acc_rad);
-      request_param("MPC_YAWRAUTO_MAX", px4_.param_mpc_yawrauto_max);
-
-      is_param_not_initialized =
-          !std::isfinite(px4_.param_mpc_xy_cruise) || !std::isfinite(px4_.param_cp_dist) ||
-          !std::isfinite(px4_.param_mpc_land_speed) || !std::isfinite(px4_.param_nav_acc_rad) ||
-          !std::isfinite(px4_.param_mpc_acc_hor) || !std::isfinite(px4_.param_mpc_jerk_max) ||
-          !std::isfinite(px4_.param_mpc_acc_down_max) || !std::isfinite(px4_.param_mpc_acc_up_max) ||
-          !std::isfinite(px4_.param_mpc_z_vel_max_dn) || !std::isfinite(px4_.param_mpc_z_vel_max_up) ||
-          !std::isfinite(px4_.param_mpc_yawrauto_max);
+      // ArduPilot lacks these PX4 parameters, so we provide safe defaults
+      px4_.param_mpc_acc_hor = 5.0f;
+      px4_.param_mpc_acc_down_max = 3.0f;
+      px4_.param_mpc_acc_up_max = 4.0f;
+      px4_.param_mpc_xy_cruise = 1.5f; // Giảm xuống 1.5m/s
+      px4_.param_mpc_z_vel_max_dn = 1.0f;
+      px4_.param_mpc_z_vel_max_up = 3.0f;
+      px4_.param_cp_dist = -1.0f; // Disable CP dist laser scan publish
+      px4_.param_mpc_land_speed = 1.0f;
+      px4_.param_mpc_jerk_max = 8.0f;
+      px4_.param_nav_acc_rad = 2.0f;
+      px4_.param_mpc_yawrauto_max = 0.785f;
     }
-
-    if (is_param_not_initialized) {
-      std::this_thread::sleep_for(std::chrono::seconds(5));
-    } else {
-      std::this_thread::sleep_for(std::chrono::seconds(30));
-    }
+    std::this_thread::sleep_for(std::chrono::seconds(60));
   }
 }
 

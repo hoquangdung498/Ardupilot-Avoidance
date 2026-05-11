@@ -250,6 +250,10 @@ class LocalPlannerNodelet : public nodelet::Nodelet {
   bool is_land_waypoint_{false};
   bool is_takeoff_waypoint_{false};
   double spin_dt_;
+  // [FIX] Configurable via ROS param "pointcloud_max_age_s" (default 0.5 s).
+  // A buffered cloud is replaced only when the incoming cloud is at least this
+  // many seconds newer, preventing stale-frame drops on a throttled Jetson.
+  double pointcloud_max_age_s_ = 0.5;
   int path_length_ = 0;
   std::vector<float> algo_time;
 

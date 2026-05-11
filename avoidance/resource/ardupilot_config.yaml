@@ -57,3 +57,12 @@ setpoint_position:
     frame_id: "local_origin"
     child_frame_id: "setpoint"
   mav_frame: LOCAL_NED
+
+distance_sensor:
+  laser_downward:
+    id: 0
+    frame_id: "laser_downward"
+    orientation: 25
+    field_of_view: 0.0
+    send_tf: false
+    sensor_position: {x: 0.0, y: 0.0, z: 0.0}

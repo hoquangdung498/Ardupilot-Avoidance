@@ -196,7 +196,7 @@ void LocalPlanner::setDefaultPx4Parameters() {
   px4_.param_mpc_acc_down_max = 10.f;
   px4_.param_mpc_z_vel_max_dn = 1.f;
   px4_.param_mpc_acc_hor = 5.f;
-  px4_.param_mpc_xy_cruise = 3.f;
+  px4_.param_mpc_xy_cruise = 1.5f; // Giảm tốc độ từ 3.f xuống 1.5f để tránh va chạm
   px4_.param_mpc_tko_speed = 1.f;
   px4_.param_mpc_land_speed = 0.7f;
   px4_.param_cp_dist = 4.f;

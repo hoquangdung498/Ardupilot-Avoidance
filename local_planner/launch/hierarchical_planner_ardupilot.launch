@@ -6,12 +6,17 @@
     <arg name="local_pointcloud_topic" default="[/camera/depth/points_downsampled]"/>
     <arg name="global_pointcloud_topic" default="[/camera/depth/points]"/>
 
+    <arg name="launch_mavros" default="true" />
+
     <!-- Define a static transform from a camera internal frame to the fcu -->
     <node pkg="tf" type="static_transform_publisher" name="tf_depth_camera"
-          args="0 0 0 -1.57 0 -1.57 fcu camera_link 10"/>
+          args="0 0 0 -1.57 0 -1.57 fcu camera_link_optical 10"/>
+
+    <!-- Dynamic TF Bridge: Translates /mavros/local_position/pose to local_origin -> fcu -->
+    <node pkg="local_planner" type="pose_to_tf.py" name="pose_to_tf_bridge" output="screen" />
 
     <!-- Launch MAVROS for Ardupilot -->
-    <include file="$(find avoidance)/launch/avoidance_ardupilot_mavros.launch" >
+    <include file="$(find avoidance)/launch/avoidance_ardupilot_mavros.launch" if="$(arg launch_mavros)">
         <arg name="fcu_url" value="$(arg fcu_url)" />
     </include>
 
@@ -34,10 +39,10 @@
     </node>
 
     <!-- Local Planner Nodelet -->
-    <node pkg="nodelet" type="nodelet" name="local_planner_nodelet" args="load avoidance/LocalPlannerNodelet $(arg manager)" output="screen">
+    <node pkg="nodelet" type="nodelet" name="local_planner_nodelet" args="load LocalPlannerNodelet $(arg manager)" output="screen">
       <!-- These initial goal params are overridden if Rviz or Global Planner sends a goal -->
       <param name="goal_x_param" value="10" />
-      <param name="goal_y_param" value="0"/>
+      <param name="goal_y_param" value="0"/>  
       <param name="goal_z_param" value="2" />
       
       <!-- Optimization for Jetson Nano CPU -->
@@ -50,11 +55,11 @@
     </node>
 
     <!-- ============================================== -->
-    <!-- GLOBAL PLANNER SECTION                         -->
+    <!-- GLOBAL PLANNER SECTION  -->
     <!-- ============================================== -->
 
     <!-- OctoMap Server -->
-    <node pkg="octomap_server" type="octomap_server_node" name="octomap_server">
+    <!-- <node pkg="octomap_server" type="octomap_server_node" name="octomap_server">
         <param name="resolution" value="1.0" />
         <param name="frame_id" type="string" value="local_origin" />
         <param name="sensor_model/max_range" value="9.0" />
@@ -70,24 +75,24 @@
         <param name="height_map" value="false" />
         <param name="publish_free_space" value="false" />
         <remap from="cloud_in" to="/camera/depth/points" />
-    </node>
+    </node> -->
 
     <!-- Global Planner Node -->
-    <node name="global_planner_node" pkg="global_planner" type="global_planner_node" output="screen">
+    <!-- <node name="global_planner_node" pkg="global_planner" type="global_planner_node" output="screen">
         <param name="frame_id" type="string" value="local_origin" />
         <param name="camera_frame_id" type="string" value="camera_link" />
         <param name="start_pos_x" value="0.0" />
         <param name="start_pos_y" value="0.0" />
         <param name="start_pos_z" value="2.0" />
         
-        <!-- Hierarchical Planning Setup: Output to Local Planner instead of MAVROS -->
         <param name="output_to_local_planner" value="true" />
         
         <rosparam param="pointcloud_topics" subst_value="True">$(arg global_pointcloud_topic)</rosparam>
         <param name="robot_radius" value="0.5" /> 
-    </node>
+    </node> -->
 
     <!-- Global GPS Adapter for Mission Planning -->
+    <!-- Xuất thẳng waypoint ENU ra topic intermediate_goal cho Local Planner -->
     <node name="global_gps_adapter" pkg="global_planner" type="global_gps_adapter" output="screen" />
 
 </launch>

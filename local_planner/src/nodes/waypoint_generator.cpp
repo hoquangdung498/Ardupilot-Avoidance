@@ -403,6 +403,9 @@ void WaypointGenerator::getPathMsg() {
     smoothWaypoint(dt);
   }
 
+  // Chuyển đổi position_wp thành linear_velocity_wp
+  transformPositionToVelocityWaypoint();
+  
   ROS_INFO("[WG] Final waypoint: [%f %f %f]. %f %f %f \n", output_.smoothed_goto_position.x(),
            output_.smoothed_goto_position.y(), output_.smoothed_goto_position.z(), output_.linear_velocity_wp.x(),
            output_.linear_velocity_wp.y(), output_.linear_velocity_wp.z());
@@ -440,7 +443,7 @@ bool WaypointGenerator::isAltitudeChange() {
   const bool need_to_change_altitude = offboard_goal_altitude_not_reached || auto_takeoff || auto_land_;
   if (need_to_change_altitude) {
     if (nav_state_ == NavigationState::offboard) {
-      if (position_.z() >= goal_.z()) {
+      if (position_.z() >= goal_.z() - 0.5f) { // Thêm dung sai 0.5m để báo hiệu đã đạt độ cao
         reach_altitude_offboard_ = true;
         return false;
       }

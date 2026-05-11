@@ -2,9 +2,14 @@
     <arg name="fcu_url" default="/dev/ttyTHS1:921600"/>
     <arg name="pointcloud_topics" default="[/camera/depth/points_downsampled]"/>
 
+    <!-- Kích hoạt môi trường in debug log cho Local Planner -->
+    <env name="ROSCONSOLE_CONFIG_FILE" value="$(find local_planner)/resource/custom_rosconsole.conf"/>
+
     <!-- Define a static transform from a camera internal frame to the fcu for every camera used -->
     <node pkg="tf" type="static_transform_publisher" name="tf_depth_camera"
-          args="0 0 0 -1.57 0 -1.57 fcu camera_link 10"/>
+          args="0 0 0 -1.57 0 -1.57 fcu camera_link_optical 10"/>
+
+    <node pkg="local_planner" type="pose_to_tf.py" name="pose_to_tf_bridge" output="screen" />
 
     <!-- Launch local planner -->
     <arg name="manager" default="local_planner_manager"/>
@@ -16,8 +21,8 @@
       <remap from="~input" to="/camera/depth/points" />
       <remap from="~output" to="/camera/depth/points_downsampled" />
       <param name="filter_field_name" value="z" />
-      <param name="filter_limit_min" value="0.2" />
-      <param name="filter_limit_max" value="5.0" />
+      <param name="filter_limit_min" value="0.0" />
+      <param name="filter_limit_max" value="15.0" />
       <param name="filter_limit_negative" value="False" />
       <param name="leaf_size" value="0.2" />
     </node>
@@ -27,15 +32,17 @@
         <arg name="fcu_url" value="$(arg fcu_url)" />
     </include>
 
-    <node pkg="nodelet" type="nodelet" name="local_planner_nodelet" args="load avoidance/LocalPlannerNodelet $(arg manager)" output="screen">
+    <node pkg="nodelet" type="nodelet" name="local_planner_nodelet" args="load LocalPlannerNodelet $(arg manager)" output="screen">
       <param name="goal_x_param" value="10" />
       <param name="goal_y_param" value="0"/>
       <param name="goal_z_param" value="2" />
       
       <!-- Optimization for Jetson Nano CPU -->
-      <param name="children_per_node_" value="4" />
-      <param name="n_expanded_nodes_" value="20" />
-      <param name="smoothing_margin_degrees_" value="30" />
+      <param name="smoothing_speed_xy_" value="4.0" />
+      <param name="velocity_cost_param_" value="15000.0" />
+      <param name="children_per_node_" value="50" />
+      <param name="n_expanded_nodes_" value="15" />
+      <param name="smoothing_margin_degrees_" value="40" />
       <param name="min_num_points_per_cell_" value="2" />
       
       <rosparam param="pointcloud_topics" subst_value="True">$(arg pointcloud_topics)</rosparam>

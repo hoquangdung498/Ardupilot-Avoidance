@@ -69,8 +69,8 @@ void LocalPlannerNodelet::InitializeNodelet() {
   local_planner_.reset(new LocalPlanner());
   wp_generator_.reset(new WaypointGenerator());
   
-  // [ĐÃ XÓA] avoidance_node_.reset(...) -> Vì class này chứa State Machine và Failsafe 
-  // chuyên biệt của PX4 (như MAV_STATE_BOOT, AUTO, OFFBOARD). ArduPilot tự quản lý Failsafe.
+  // Khởi tạo Avoidance Node (Chứa các tham số được load từ launch file)
+  avoidance_node_.reset(new AvoidanceNode(nh_, nh_private_));
 
 #ifndef DISABLE_SIMULATION
   world_visualizer_.reset(new WorldVisualizer(nh_, nodelet::Nodelet::getName()));
@@ -97,14 +97,14 @@ void LocalPlannerNodelet::InitializeNodelet() {
   state_sub_ = nh_.subscribe("mavros/state", 1, &LocalPlannerNodelet::stateCallback, this);
   
   // Cảm biến khoảng cách dưới bụng (nếu có)
-  distance_sensor_sub_ = nh_.subscribe("mavros/altitude", 1, &LocalPlannerNodelet::distanceSensorCallback, this);
+  // distance_sensor_sub_ = nh_.subscribe("mavros/altitude", 1, &LocalPlannerNodelet::distanceSensorCallback, this);
 
   // =====================================================================
   // 2. SUBSCRIBERS: Nhận lệnh Goal (Đích đến) từ người dùng / Rviz
   // =====================================================================
-  clicked_point_sub_ = nh_.subscribe("clicked_point", 1, &LocalPlannerNodelet::clickedPointCallback, this);
-  clicked_goal_sub_ = nh_.subscribe("move_base_simple/goal", 1, &LocalPlannerNodelet::clickedGoalCallback, this);
-  goal_topic_sub_ = nh_.subscribe("input/goal_position", 1, &LocalPlannerNodelet::updateGoalCallback, this);
+  // clicked_point_sub_ = nh_.subscribe("clicked_point", 1, &LocalPlannerNodelet::clickedPointCallback, this);
+  // clicked_goal_sub_ = nh_.subscribe("move_base_simple/goal", 1, &LocalPlannerNodelet::clickedGoalCallback, this);
+  // goal_topic_sub_ = nh_.subscribe("input/goal_position", 1, &LocalPlannerNodelet::updateGoalCallback, this);
   intermediate_goal_sub_ = nh_.subscribe("intermediate_goal", 1, &LocalPlannerNodelet::intermediateGoalCallback, this);
 
   // [ĐÃ XÓA] fcu_input_sub_ (Topic "mavros/trajectory/desired" của PX4)
@@ -157,6 +157,11 @@ void LocalPlannerNodelet::readParams() {
   nh_private_.param<double>("goal_z_param", goal_d.z(), 0.0);
   nh_private_.param<bool>("accept_goal_input_topic", accept_goal_input_topic_, false);
   goal_position_ = goal_d.cast<float>();
+
+  // [FIX] Maximum age (seconds) before a buffered-but-untransformed point cloud
+  // is considered stale and replaced by the incoming one.  Increase this on a
+  // Jetson under CPU throttle or when the depth camera stutters (e.g. 0.5–1.0 s).
+  nh_private_.param<double>("pointcloud_max_age_s", pointcloud_max_age_s_, 0.5);
 
   std::vector<std::string> camera_topics;
   nh_private_.getParam(nodelet::Nodelet::getName() + "/pointcloud_topics", camera_topics);
@@ -276,8 +281,8 @@ void LocalPlannerNodelet::cmdLoopCallback(const ros::TimerEvent& event) {
         ROS_WARN("\033[1;33m Planner abort: missing required data from FCU \n \033[0m");
         ROS_WARN("----------------------------- Debugging Info -----------------------------");
         ROS_WARN("Local planner has not received a position from FCU, check the following: ");
-        ROS_WARN("1. Check cables connecting PX4 autopilot with onboard computer");
-        ROS_WARN("2. Set PX4 parameter MAV_1_MODE to onbard or external vision");
+        ROS_WARN("1. Check cables connecting Ardupilot with onboard computer");
+        ROS_WARN("2. Set Ardupilot parameter SERIAL1_PROTOCOL to 2 (MAVLink 2)");
         ROS_WARN("3. Set correct fcu_url in local_planner launch file:");
         ROS_WARN("   Example direct connection to serial port: /dev/ttyUSB0:921600");
         ROS_WARN("   Example connection over mavlink router: udp://:14540@localhost:14557");
@@ -339,7 +344,43 @@ void LocalPlannerNodelet::calculateWaypoints(bool hover) {
   mavros_msgs::Trajectory obst_free_path = {};
   transformToTrajectory(obst_free_path, toPoseStamped(result.position_wp, result.orientation_wp),
                         toTwist(result.linear_velocity_wp, result.angular_velocity_wp));
-  mavros_pos_setpoint_pub_.publish(toPoseStamped(result.position_wp, result.orientation_wp));
+
+  // [FIX] Publish exclusively to ONE setpoint topic per control cycle.
+  // Publishing to both setpoint_velocity/cmd_vel and setpoint_position/local in
+  // the same iteration causes GUIDED-mode control contention in ArduPilot:
+  // the FCU treats the last-received setpoint type as authoritative, leading to
+  // jerky or unpredictable behaviour.
+  //
+  // Strategy:
+  //   • If the planner computed a finite velocity setpoint → use velocity control
+  //     (smoother for avoidance manoeuvres).
+  //   • Otherwise fall back to position control (e.g. when hovering or when the
+  //     planner returns NaN velocity).
+  const Eigen::Vector3f& vel_wp = result.linear_velocity_wp;
+  const bool valid_velocity_setpoint = vel_wp.allFinite();
+
+  if (valid_velocity_setpoint) {
+    geometry_msgs::TwistStamped vel_msg;
+    vel_msg.header.stamp = ros::Time::now();
+    vel_msg.header.frame_id = "local_origin";
+    
+    // Giữ chế độ điều khiển vận tốc (Velocity Control) ngay cả khi vận tốc ~ 0 (Hover)
+    // để tránh ArduPilot bị khựng (jerk) do chuyển đổi qua lại giữa Position và Velocity Control
+    if (vel_wp.norm() <= 1e-3f) {
+      vel_msg.twist.linear.x = 0.0;
+      vel_msg.twist.linear.y = 0.0;
+      vel_msg.twist.linear.z = 0.0;
+      vel_msg.twist.angular.x = 0.0;
+      vel_msg.twist.angular.y = 0.0;
+      vel_msg.twist.angular.z = 0.0;
+    } else {
+      vel_msg.twist = toTwist(result.linear_velocity_wp, result.angular_velocity_wp);
+    }
+    mavros_vel_setpoint_pub_.publish(vel_msg);
+  } else {
+    // Chỉ Fallback về điều khiển vị trí khi vận tốc bị lỗi (NaN)
+    mavros_pos_setpoint_pub_.publish(toPoseStamped(result.position_wp, result.orientation_wp));
+  }
 
   mavros_obstacle_free_path_pub_.publish(obst_free_path);
 }
@@ -369,6 +410,8 @@ void LocalPlannerNodelet::intermediateGoalCallback(const geometry_msgs::PoseStam
   new_goal_ = true;
   prev_goal_position_ = goal_position_;
   goal_position_ = toEigen(msg.pose.position);
+  // Cập nhật tham số RQT để DynamicReconfigure không vô tình ghi đè lại Z
+  rqt_param_config_.goal_z_param = goal_position_.z();
 }
 
 void LocalPlannerNodelet::fcuInputGoalCallback(const mavros_msgs::Trajectory& msg) {
@@ -446,7 +489,11 @@ void LocalPlannerNodelet::pointCloudCallback(const sensor_msgs::PointCloud2::Con
     return msg->header.stamp - lastCloudReceived;
   };
 
-  if (cameras_[index].received_ && timeSinceLast() < ros::Duration(0.3)) {
+  // [FIX] Use the configurable threshold (pointcloud_max_age_s) instead of a
+  // hardcoded 0.3 s so that valid frames are not discarded on a throttled Jetson
+  // or when the depth camera stutters.  The check still prevents the transform
+  // thread from being handed the same cloud twice (timeSinceLast > 0).
+  if (cameras_[index].received_ && timeSinceLast() < ros::Duration(pointcloud_max_age_s_)) {
     return;
   }
 
